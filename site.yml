@@ -1,0 +1,27 @@
+---
+- name: Install Sia, Sia-UI and Sia Host Manager
+  hosts: sia
+  become: true
+
+  vars:
+    siad_version: "v1.5.7"
+    sia_ui_version: "v1.4.3"
+    sia_host_manager_version: "v1.1.1"
+    folders_list:
+      - folder: "/mnt/mfs/sia/sia1"
+        size: "1TB"
+    # Current average prices set as of 2022-04-21, adjust and salt to taste
+    minimum_storage_price: "278.23SC"
+    minimum_download_price: "214.41SC"
+    minimum_upload_price: "78.7SC"
+
+  roles:
+    #- siad
+    - sia-ui
+    - sia-host-manager
+
+  tasks:
+    # Output a helpful message if we created a wallet during this Ansible playbook's execution.
+    - debug:
+        msg: "[ATTENTION] A wallet was created during this run. Please safely back up ~siad/Sia/wallet.keys then remove it."
+      when: walletcreated.changed

@@ -1,0 +1,13 @@
+[Unit]
+Description=Sia Daemon
+
+[Service]
+ExecStart=/home/siad/Sia/siad/siad
+WorkingDirectory=/home/siad/Sia/siad
+Restart=always
+User=siad
+Group=siad
+
+[Install]
+WantedBy=multi-user.target
+Alias=siad.service

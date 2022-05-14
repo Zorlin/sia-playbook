@@ -1,0 +1,9 @@
+---
+# Download Sia-UI
+- name: Download Sia-UI
+  get_url:
+    url: https://sia.tech/releases/Sia-UI-{{ sia_ui_version }}.AppImage
+    dest: /home/siad/Sia/Sia-UI-{{ sia_ui_version }}.AppImage
+    mode: '0750'
+    owner: siad
+    group: siad

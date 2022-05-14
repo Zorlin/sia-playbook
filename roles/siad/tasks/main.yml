@@ -1,0 +1,257 @@
+---
+# Download siad
+- name: Install python3-apt, python3-pip
+  package:
+    name:
+      - python3-apt
+      - python3-pip
+    state: present
+
+- name: Install pexpect
+  pip:
+    name: pexpect
+
+- name: Gather the package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Create siad user
+  user:
+    name: siad
+    comment: Sia Daemon
+    shell: /bin/bash
+    uid: 29981 # uid based on port number
+
+- name: Create directories for Sia services and tools
+  file:
+    path: "{{ item }}"
+    state: directory
+    recurse: false
+    owner: siad
+    group: siad
+    mode: 0700
+  loop:
+    - /home/siad/Sia/
+    - /home/siad/Sia/siad
+
+- name: Download Sia GPG signing key
+  get_url:
+    url: https://sia.tech/releases/sia-signing-key.asc
+    dest: /home/siad/Sia/sia-signing-key.asc
+    owner: siad
+    group: siad
+    mode: '0440'
+
+- name: Check that GPG is installed
+  package:
+    name: gnupg
+    state: present
+
+# TODO: make this check better
+- name: Import Sia GPG signing key
+  command:
+    cmd: "gpg --import /home/siad/Sia/sia-signing-key.asc"
+    creates: /home/siad/.gnupg/trustdb.gpg
+
+- name: Download siad (Sia Daemon)
+  get_url:
+    url: https://sia.tech/releases/Sia-{{ siad_version }}-linux-amd64.zip
+    dest: /home/siad/Sia/siad-{{ siad_version }}.zip
+    mode: '0440'
+    owner: siad
+    group: siad
+
+- name: Download signed hashes for siad
+  get_url:
+    url: https://sia.tech/releases/Sia-{{ siad_version }}-SHA256SUMS.txt.asc
+    dest: /home/siad/Sia/Sia-{{ siad_version }}-SHA256SUMS.txt.asc
+    mode: '0440'
+    owner: siad
+    group: siad
+
+# - name: Verify signed hashes for siad
+#   command:
+#     cmd: gpg --verify Sia-{{ siad_version }}-SHA256SUMS.txt.asc
+#     chdir: /home/siad/Sia/
+
+- name: Unpack siad (Sia Daemon)
+  unarchive:
+    src: /home/siad/Sia/siad-{{ siad_version }}.zip
+    dest: /home/siad/Sia/siad/
+    remote_src: true
+  become: true
+  become_user: siad
+
+- name: Verify signatures for siad
+  command:
+    cmd: "sha256sum --check --ignore-missing ../Sia-v1.5.7-SHA256SUMS.txt.asc"
+    chdir: /home/siad/Sia/siad/
+  register: sigverify
+  failed_when: "sigverify.rc != 0 or 'FAILED' in sigverify.stdout"
+  changed_when: false
+
+- name: Symlink siad and siac
+  file:
+    state: link
+    force: true
+    follow: false
+    src: "/home/siad/Sia/siad/Sia-{{ siad_version }}-linux-amd64/{{ item }}"
+    dest: "/home/siad/Sia/siad/{{ item }}"
+    owner: siad
+    group: siad
+    mode: 0700
+  loop:
+    - siad
+    - siac
+
+- name: Configure siad systemd service
+  template:
+    src: systemd/siad.service
+    dest: /etc/systemd/system/siad.service
+    owner: root
+    group: root
+    mode: 0755
+
+- name: Check whether ufw is active
+  shell: ufw status
+  changed_when: False
+  failed_when: False
+  register: ufw_check
+  when: "'ufw' in ansible_facts.packages"
+
+- name: Add a UFW rule for siad if ufw is active
+  community.general.ufw:
+    rule: allow
+    port: 9981:9984
+    proto: tcp
+  when: "'active' in ufw_check.stdout"
+
+# TODO: - name: Check if firewalld is active
+#       - name: Add a firewalld rule for siad if firewalld is active
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: true
+
+- name: Enable and start siad service
+  systemd:
+    name: siad
+    enabled: true
+    state: started
+
+- name: Check that siad is running
+  command:
+    cmd: 'curl -s -X GET http://localhost:9980/consensus -A "Sia-Agent"'
+  register: siad_check
+  failed_when: siad_check.rc != 0
+  changed_when: false
+
+- name: Add Sia executables to path
+  lineinfile:
+    path: $HOME/.bashrc
+    line: 'export PATH="/home/siad/Sia/siad:$PATH"'
+  become: true
+  become_user: siad
+
+- name: Check if wallet has been encrypted (and thus has been initialized properly)
+  ansible.builtin.expect:
+    command: "/home/siad/Sia/siad/siac wallet unlock"
+    responses:
+      (?i)Wallet password: "intentionally-wrong-password-this-will-never-work"
+    chdir:
+  failed_when: false
+  register: walletstatus
+  become: true
+  become_user: siad
+
+- name: Create wallet if no wallet appears to exist yet
+  shell:
+    cmd: "/home/siad/Sia/siad/siac wallet init > /home/siad/Sia/wallet.keys"
+  when: '"wallet has not been encrypted yet" in walletstatus.stdout'
+  register: walletcreated
+  no_log: true
+  become: true
+  become_user: siad
+
+- name: Check if wallet.keys exists
+  stat:
+    path: /home/siad/Sia/wallet.keys
+  register: wallet_keys_exists
+
+- name: Read wallet unlock password from wallet.keys
+  command:
+    cmd: "sed -n '5p' /home/siad/Sia/wallet.keys"
+  register: wallet_unlock_password
+  no_log: true
+  when: wallet_keys_exists.stat.exists
+
+- name: Unlock wallet
+  ansible.builtin.expect:
+    command: "/home/siad/Sia/siad/siac wallet unlock"
+    responses:
+      (?i)Wallet password: "{{ wallet_unlock_password.stdout }}"
+    chdir:
+  failed_when: false
+  register: walletstatus
+  become: true
+  become_user: siad
+
+- name: Create wallet receive address
+  shell:
+    cmd: "/home/siad/Sia/siad/siac wallet address"
+  #when: walletstatus.rc = 0
+  register: wallet_receive_addr
+  no_log: true
+  become: true
+  become_user: siad
+
+- name: Configure host fees - minimum_storage_price
+  command:
+    cmd: "/home/siad/Sia/siad/siac host config minstorageprice {{ minimum_storage_price }}"
+  become: true
+  become_user: siad
+
+- name: Configure host fees - minimum_download_price
+  command:
+    cmd: "/home/siad/Sia/siad/siac host config mindownloadbandwidthprice {{ minimum_download_price }}"
+  become: true
+  become_user: siad
+
+- name: Configure host fees - minimum_upload_price
+  command:
+    cmd: "/home/siad/Sia/siad/siac host config minuploadbandwidthprice {{ minimum_upload_price }}"
+  become: true
+  become_user: siad
+
+- name: Configure host - get list of host folders
+  shell:
+    cmd: "/home/siad/Sia/siad/siac host | sed -n '/Storage Folders:/,$p'"
+  register: hostconfig_folders
+  become: true
+  become_user: siad
+
+- debug:
+    msg: "{{ hostconfig_folders }}"
+  become: true
+  become_user: siad
+
+- name: Configure host - add folders if not in the list
+  command:
+    cmd: "/home/siad/Sia/siad/siac host folder add {{ item.folder }} {{ item.size }}"
+  when: "item.folder|string not in hostconfig_folders.stdout"
+  loop: "{{ folders_list }}"
+  become: true
+  become_user: siad
+
+- name: Get host config
+  command:
+    cmd: "/home/siad/Sia/siad/siac host"
+  register: host_config_final
+
+- name: "Print configuration for user to review"
+  debug:
+    msg: "{{ host_config_final.stdout.split('\n') }}"
+
+- name: Check if user is ready to announce
+  pause:
+    prompt: "Would you like to announce your node to the network now? Press [ENTER] or press CTRL-C to cancel."
