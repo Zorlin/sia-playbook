@@ -55,7 +55,7 @@
 
 - name: Download siad (Sia Daemon)
   get_url:
-    url: https://sia.tech/releases/Sia-{{ siad_version }}-linux-amd64.zip
+    url: https://sia.tech/releases/siad/Sia-{{ siad_version }}-linux-amd64.zip
     dest: /home/siad/Sia/siad-{{ siad_version }}.zip
     mode: '0440'
     owner: siad
@@ -63,7 +63,7 @@
 
 - name: Download signed hashes for siad
   get_url:
-    url: https://sia.tech/releases/Sia-{{ siad_version }}-SHA256SUMS.txt.asc
+    url: https://sia.tech/releases/siad/Sia-{{ siad_version }}-SHA256SUMS.txt.asc
     dest: /home/siad/Sia/Sia-{{ siad_version }}-SHA256SUMS.txt.asc
     mode: '0440'
     owner: siad

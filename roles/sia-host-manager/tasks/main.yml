@@ -2,8 +2,8 @@
 # Download Sia Host Manager
 - name: Download Sia Host Manager
   get_url:
-    url: https://github.com/siacentral/host-manager/releases/download/{{ sia_host_manager_version }}/Sia-Host-Manager-{{ sia_host_manager_version }}.AppImage
-    dest: /home/siad/Sia/Sia-Host-Manager-{{ sia_host_manager_version }}.AppImage
+    url: https://github.com/siacentral/host-manager/releases/download/{{ sia_host_manager_version }}/Sia.Host.Manager-{{ sia_host_manager_version }}-linux-x86_64.AppImage
+    dest: /home/siad/Sia/Sia.Host.Manager-{{ sia_host_manager_version }}-linux-x86_64.AppImage
     mode: '0750'
     owner: siad
     group: siad
